@@ -21,7 +21,7 @@ const SECTIONS=[
 const TABLES={
  students:{table:'profiles',title:'الطلاب والمدرسون',select:'id,full_name,preferred_language,role,created_at',order:'created_at'},
  learning:{table:'course_modules',title:'وحدات الدورات',select:'id,course_id,title,sort_order,is_published,created_at',order:'created_at'},
- live:{table:'live_sessions',title:'الحصص المباشرة',select:'id,title,provider,starts_at,ends_at,status,access_type',order:'starts_at'},
+ live:{table:'live_sessions',title:'الحصص المباشرة',select:'id,title,description,provider,provider_room_id,course_id,starts_at,ends_at,status,access_type',order:'starts_at'},
  community:{table:'forum_posts',title:'منشورات المجتمع',select:'id,title,body,status,created_at',order:'created_at'},
  certificates:{table:'certificates',title:'الشهادات الصادرة',select:'id,user_id,course_id,certificate_code,issued_at',order:'issued_at'},
  audit:{table:'admin_audit_logs',title:'سجل نشاط الإدارة',select:'id,action,entity_type,entity_id,details,created_at',order:'created_at'},
