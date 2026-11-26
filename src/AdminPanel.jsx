@@ -1,0 +1,81 @@
+import React,{useCallback,useEffect,useState} from 'react';
+import {BookOpen,Users,Wallet,Megaphone,Ticket,LifeBuoy,Settings,ClipboardList,RefreshCw,Check, X, Plus, Save, LayoutDashboard, GraduationCap, Video, MessageSquare, Award} from 'lucide-react';
+
+const SECTIONS=[
+ {id:'overview',label:'نظرة عامة',icon:LayoutDashboard},
+ {id:'courses',label:'الدورات',icon:BookOpen},
+ {id:'students',label:'الطلاب والمدرسون',icon:Users},
+ {id:'payments',label:'المدفوعات',icon:Wallet},
+ {id:'announcements',label:'الإعلانات',icon:Megaphone},
+ {id:'coupons',label:'كوبونات الخصم',icon:Ticket},
+ {id:'support',label:'الدعم الفني',icon:LifeBuoy},
+ {id:'learning',label:'التعلم والاختبارات',icon:GraduationCap},
+ {id:'live',label:'الحصص المباشرة',icon:Video},
+ {id:'community',label:'المجتمع والتقييمات',icon:MessageSquare},
+ {id:'certificates',label:'الشهادات',icon:Award},
+ {id:'settings',label:'إعدادات المنصة',icon:Settings},
+ {id:'audit',label:'سجل الإدارة',icon:ClipboardList},
+];
+const TABLES={
+ students:{table:'profiles',title:'الطلاب والمدرسون',select:'id,full_name,preferred_language,role,created_at',order:'created_at'},
+ learning:{table:'course_modules',title:'وحدات الدورات',select:'id,course_id,title,sort_order,is_published,created_at',order:'created_at'},
+ live:{table:'live_sessions',title:'الحصص المباشرة',select:'id,title,provider,starts_at,ends_at,status,access_type',order:'starts_at'},
+ community:{table:'forum_posts',title:'منشورات المجتمع',select:'id,title,body,status,created_at',order:'created_at'},
+ certificates:{table:'certificates',title:'الشهادات الصادرة',select:'id,user_id,course_id,certificate_code,issued_at',order:'issued_at'},
+ audit:{table:'admin_audit_logs',title:'سجل نشاط الإدارة',select:'id,action,entity_type,entity_id,details,created_at',order:'created_at'},
+};
+const titleOf=v=>typeof v==='string'?v:(v?.ar||v?.fr||v?.en||'—');
+const dateOf=v=>v?new Date(v).toLocaleString('ar-DZ'):'—';
+export default function AdminPanel({supabase,session,courses,onCoursesChanged,notify}){
+ const [section,setSection]=useState('overview'),[rows,setRows]=useState([]),[loading,setLoading]=useState(false),[draft,setDraft]=useState({}),[settings,setSettings]=useState([]),[settingsText,setSettingsText]=useState('{}'),[announce,setAnnounce]=useState({title:'',body:''}),[coupon,setCoupon]=useState({code:'',discount_type:'percent',discount_value:10,max_uses:''});
+ const [counts,setCounts]=useState({students:0,payments:0,pending:0,enrollments:0,tickets:0});
+ const loadRows=useCallback(async()=>{
+  setLoading(true);let result;
+  if(section==='payments') result=await supabase.from('payment_requests').select('id,user_id,course_id,amount,currency,method,status,provider_reference,created_at,admin_note').order('created_at',{ascending:false}).limit(100);
+  else if(section==='announcements') result=await supabase.from('announcements').select('*').order('created_at',{ascending:false}).limit(100);
+  else if(section==='coupons') result=await supabase.from('coupons').select('*').order('created_at',{ascending:false}).limit(100);
+  else if(section==='support') result=await supabase.from('support_tickets').select('*').order('created_at',{ascending:false}).limit(100);
+  else if(TABLES[section]){const t=TABLES[section];result=await supabase.from(t.table).select(t.select).order(t.order,{ascending:false}).limit(100);}
+  else if(section==='settings'){const r=await supabase.from('academy_settings').select('*').order('key');if(r.error)notify(r.error.message);else{setSettings(r.data||[]);setSettingsText(JSON.stringify(Object.fromEntries((r.data||[]).map(x=>[x.key,x.value])),null,2));}setLoading(false);return;}
+  if(result){if(result.error)notify(result.error.message);else setRows(result.data||[]);}
+  setLoading(false);
+ },[section,supabase,notify]);
+ useEffect(()=>{if(section!=='overview')loadRows();},[section,loadRows]);
+ const loadCounts=useCallback(async()=>{
+  const specs=[['students','profiles'],['payments','payment_requests'],['pending','payment_requests'],['enrollments','enrollments'],['tickets','support_tickets']];
+  const values=await Promise.all(specs.map(([k,t])=>supabase.from(t).select('id',{count:'exact',head:true,...(k==='pending'?{filters:undefined}:{})})));
+  const pending=await supabase.from('payment_requests').select('id',{count:'exact',head:true}).eq('status','pending');
+  setCounts({students:values[0].count||0,payments:values[1].count||0,pending:pending.count||0,enrollments:values[3].count||0,tickets:values[4].count||0});
+ },[supabase]);
+ useEffect(()=>{if(section==='overview'){loadCounts();}},[section,loadCounts]);
+ async function reviewPayment(id,status){const note=window.prompt(status==='approved'?'ملاحظة اعتماد (اختياري)':'سبب الرفض (اختياري)')||null;const {error}=await supabase.from('payment_requests').update({status,admin_note:note,reviewed_by:session.user.id,reviewed_at:new Date().toISOString()}).eq('id',id).eq('status','pending');if(error)notify(error.message);else{notify(status==='approved'?'تم اعتماد الدفع وتفعيل الالتحاق عبر النظام':'تم رفض طلب الدفع');loadRows();loadCounts();}}
+ async function addAnnouncement(e){e.preventDefault();const {error}=await supabase.from('announcements').insert({title:{ar:announce.title},body:{ar:announce.body},is_published:false});if(error)notify(error.message);else{notify('تم حفظ الإعلان كمسودة');setAnnounce({title:'',body:''});loadRows();}}
+ async function addCoupon(e){e.preventDefault();const {error}=await supabase.from('coupons').insert({code:coupon.code.trim().toUpperCase(),discount_type:coupon.discount_type,discount_value:Number(coupon.discount_value),max_uses:coupon.max_uses?Number(coupon.max_uses):null});if(error)notify(error.message);else{notify('تم إنشاء الكوبون');setCoupon({code:'',discount_type:'percent',discount_value:10,max_uses:''});loadRows();}}
+ async function toggleAnnouncement(row){const {error}=await supabase.from('announcements').update({is_published:!row.is_published,published_at:!row.is_published?new Date().toISOString():null}).eq('id',row.id);if(error)notify(error.message);else loadRows();}
+ async function toggleCoupon(row){const {error}=await supabase.from('coupons').update({is_active:!row.is_active}).eq('id',row.id);if(error)notify(error.message);else loadRows();}
+ async function updateTicket(row,status){const {error}=await supabase.from('support_tickets').update({status,updated_at:new Date().toISOString()}).eq('id',row.id);if(error)notify(error.message);else loadRows();}
+ async function saveSettings(e){e.preventDefault();let parsed;try{parsed=JSON.parse(settingsText);if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw new Error('يجب إدخال كائن JSON');}catch(err){notify('صيغة الإعدادات غير صحيحة: '+err.message);return;}
+  for(const [key,value] of Object.entries(parsed)){const {error}=await supabase.from('academy_settings').upsert({key,value,updated_by:session.user.id,updated_at:new Date().toISOString()},{onConflict:'key'});if(error){notify('تعذر حفظ '+key+': '+error.message);return;}}
+  notify('تم حفظ إعدادات المنصة');loadRows();
+ }
+ const tableView=(columns,render)=> <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{columns.map(c=><th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={r.id||i}>{render(r)}</tr>)}</tbody></table>{!rows.length&&<div className="admin-empty">{loading?'جار التحميل…':'لا توجد سجلات بعد'}</div>}</div>;
+ return <section className="control-room" dir="rtl">
+  <aside className="control-sidebar"><div className="control-brand"><img src="/logo.svg"/><div><b>ACA ADMIN</b><small>لوحة المدير العام</small></div></div>{SECTIONS.map(s=><button key={s.id} className={section===s.id?'selected':''} onClick={()=>setSection(s.id)}><s.icon size={17}/>{s.label}</button>)}<div className="sidebar-foot">صلاحيات المدير العام<br/>البيانات محمية عبر RLS</div></aside>
+  <div className="control-main"><div className="control-top"><div><small>ALGERIA CODING ACADEMY / CONTROL CENTER</small><h2>{SECTIONS.find(s=>s.id===section)?.label}</h2></div><button className="btn ghost" onClick={()=>section==='overview'?loadCounts():loadRows()}><RefreshCw size={16}/> تحديث البيانات</button></div>
+  {section==='overview'&&<><div className="control-metrics">{[['عدد الطلاب',counts.students,Users],['طلبات الدفع',counts.payments,Wallet],['طلبات تنتظر المراجعة',counts.pending,ClipboardList],['التحاقات بالدورات',counts.enrollments,BookOpen],['تذاكر الدعم',counts.tickets,LifeBuoy],['الدورات المنشأة',courses.length,GraduationCap]].map(([label,value,Icon])=><div className="metric-card" key={label}><Icon/><span>{label}</span><b>{value}</b></div>)}</div><div className="control-notice"><b>مركز التحكم</b><p>يمكنك مراجعة طلبات الدفع، إدارة الإعلانات والكوبونات، متابعة الطلاب والدعم، وتعديل إعدادات الأكاديمية. صلاحيات تعديل الأدوار الحساسة تبقى محمية من قاعدة البيانات.</p><button className="btn primary" onClick={()=>setSection('payments')}>مراجعة المدفوعات</button></div></>}
+  {section==='courses'&&<div className="control-notice"><h3>إدارة الدورات</h3><p>أداة إنشاء وتعديل ونشر الدورات الأساسية موجودة في قسم الدورات بالموقع. استخدمها لإدارة العنوان والوصف والمستوى والسعر بالدولار والدينار.</p><div className="mini-course-list">{courses.map(c=><div key={c.id}><b>{titleOf(c.title)}</b><span>{c.status} · {Number(c.price_usd||0)} USD / {Number(c.price_dzd||0)} DZD</span></div>)}</div></div>}
+  {section==='payments'&&<>{tableView(['المعرف','المستخدم','المبلغ','الطريقة','الحالة','التاريخ','إجراء'],r=><><td><code>{r.id.slice(0,8)}</code></td><td><code>{r.user_id.slice(0,8)}</code></td><td>{r.amount} {r.currency}</td><td>{r.method}</td><td><span className={'status '+r.status}>{r.status}</span></td><td>{dateOf(r.created_at)}</td><td>{r.status==='pending'?<div className="row-actions"><button className="approve" onClick={()=>reviewPayment(r.id,'approved')}><Check size={15}/> اعتماد</button><button className="reject" onClick={()=>reviewPayment(r.id,'rejected')}><X size={15}/> رفض</button></div>:r.admin_note||'—'}</td></>)}</> )}
+  {section==='announcements'&&<><form className="admin-inline-form" onSubmit={addAnnouncement}><h3>إضافة إعلان</h3><input required placeholder="عنوان الإعلان" value={announce.title} onChange={e=>setAnnounce({...announce,title:e.target.value})}/><textarea required placeholder="نص الإعلان" value={announce.body} onChange={e=>setAnnounce({...announce,body:e.target.value})}/><button className="btn primary"><Plus size={16}/> حفظ كمسودة</button></form>{tableView(['العنوان','الحالة','التاريخ','الإجراء'],r=><><td>{titleOf(r.title)}</td><td>{r.is_published?'منشور':'مسودة'}</td><td>{dateOf(r.created_at)}</td><td><button className="btn ghost" onClick={()=>toggleAnnouncement(r)}>{r.is_published?'إلغاء النشر':'نشر الإعلان'}</button></td></>)}</>}
+  {section==='coupons'&&<><form className="admin-inline-form" onSubmit={addCoupon}><h3>إنشاء كوبون خصم</h3><div className="admin-form-grid"><input required placeholder="CODE" value={coupon.code} onChange={e=>setCoupon({...coupon,code:e.target.value.toUpperCase()})}/><select value={coupon.discount_type} onChange={e=>setCoupon({...coupon,discount_type:e.target.value})}><option value="percent">نسبة مئوية %</option><option value="fixed_usd">مبلغ USD</option><option value="fixed_dzd">مبلغ DZD</option></select><input required type="number" min="0.01" step="0.01" placeholder="قيمة الخصم" value={coupon.discount_value} onChange={e=>setCoupon({...coupon,discount_value:e.target.value})}/><input type="number" min="1" placeholder="عدد الاستخدامات (اختياري)" value={coupon.max_uses} onChange={e=>setCoupon({...coupon,max_uses:e.target.value})}/></div><button className="btn primary"><Plus size={16}/> إنشاء الكوبون</button></form>{tableView(['الكود','الخصم','الاستخدام','الحالة','إجراء'],r=><><td><b>{r.code}</b></td><td>{r.discount_value} ({r.discount_type})</td><td>{r.used_count}/{r.max_uses||'∞'}</td><td>{r.is_active?'نشط':'متوقف'}</td><td><button className="btn ghost" onClick={()=>toggleCoupon(r)}>{r.is_active?'إيقاف':'تفعيل'}</button></td></>)}</>}
+  {section==='support'&&tableView(['الموضوع','المستخدم','الأولوية','الحالة','تاريخ الطلب','الإجراء'],r=><><td>{r.subject}<small className="subline">{r.message}</small></td><td><code>{r.user_id.slice(0,8)}</code></td><td>{r.priority}</td><td>{r.status}</td><td>{dateOf(r.created_at)}</td><td><select value={r.status} onChange={e=>updateTicket(r,e.target.value)}><option value="open">مفتوحة</option><option value="in_progress">قيد المعالجة</option><option value="resolved">تم الحل</option><option value="closed">مغلقة</option></select></td></>)}
+  {TABLES[section]&&section!=='students'&&section!=='learning'&&section!=='live'&&section!=='community'&&section!=='certificates'&&section!=='audit'&&null}
+  {section==='students'&&tableView(['الاسم','المعرف','اللغة','الدور','تاريخ التسجيل'],r=><><td>{r.full_name||'بدون اسم'}</td><td><code>{r.id.slice(0,10)}</code></td><td>{r.preferred_language}</td><td>{r.role}</td><td>{dateOf(r.created_at)}</td></>)}
+  {section==='learning'&&tableView(['الوحدة','الدورة','الترتيب','النشر','تاريخ الإنشاء'],r=><><td>{titleOf(r.title)}</td><td><code>{r.course_id.slice(0,8)}</code></td><td>{r.sort_order}</td><td>{r.is_published?'منشورة':'مسودة'}</td><td>{dateOf(r.created_at)}</td></>)}
+  {section==='live'&&tableView(['الحصة','المزود','البداية','النهاية','الحالة'],r=><><td>{titleOf(r.title)}</td><td>{r.provider||'—'}</td><td>{dateOf(r.starts_at)}</td><td>{dateOf(r.ends_at)}</td><td>{r.status}</td></>)}
+  {section==='community'&&tableView(['العنوان','المحتوى','الحالة','التاريخ'],r=><><td>{r.title}</td><td>{r.body}</td><td>{r.status}</td><td>{dateOf(r.created_at)}</td></>)}
+  {section==='certificates'&&tableView(['رمز الشهادة','الطالب','الدورة','تاريخ الإصدار'],r=><><td><b>{r.certificate_code}</b></td><td><code>{r.user_id.slice(0,8)}</code></td><td><code>{r.course_id.slice(0,8)}</code></td><td>{dateOf(r.issued_at)}</td></>)}
+  {section==='audit'&&tableView(['العملية','النوع','المعرف','التفاصيل','التاريخ'],r=><><td>{r.action}</td><td>{r.entity_type}</td><td>{r.entity_id||'—'}</td><td>{JSON.stringify(r.details)}</td><td>{dateOf(r.created_at)}</td></>)}
+  {section==='settings'&&<form className="settings-editor" onSubmit={saveSettings}><h3>إعدادات الأكاديمية (JSON)</h3><p>يمكنك تعديل القيم العامة المخزنة في academy_settings. لا تضع مفاتيح سرية هنا.</p><textarea dir="ltr" spellCheck="false" value={settingsText} onChange={e=>setSettingsText(e.target.value)}/><button className="btn primary"><Save size={16}/> حفظ الإعدادات</button><small>{settings.length} إعداد محفوظ حالياً</small></form>}
+  </div>
+ </section>;
+}
